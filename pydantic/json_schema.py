@@ -198,39 +198,7 @@ class GenerateJsonSchema:
 
         # Generate the JSON schema, accounting for the json_schema_override and core_schema_override
         metadata_handler = _core_metadata.CoreMetadataHandler(schema)
-        js_override = metadata_handler.get_js_override()
-        js_cs_override = metadata_handler.get_js_cs_override()
-
-        if js_override is not None:
-            json_schema = js_override
-        elif js_cs_override is not None:
-            # If there is a core schema override, use it to generate the JSON schema
-            json_schema = self.generate_inner(js_cs_override)
-        else:
-            # Generate the core-schema-type-specific bits of the schema generation:
-            if _core_utils.is_typed_dict_field(schema):
-                json_schema = self.typed_dict_field_schema(schema)
-            elif _core_utils.is_dataclass_field(schema):
-                json_schema = self.dataclass_field_schema(schema)
-            elif _core_utils.is_core_schema(schema):  # Ideally we wouldn't need this redundant typeguard..
-                generate_for_schema_type = self._schema_type_to_method[schema['type']]
-                json_schema = generate_for_schema_type(schema)
-            else:
-                raise TypeError(f'Unexpected schema type: schema={schema}')
-
-        # Apply the modify_js function, if present
-        schema_to_update: JsonSchemaValue | None = None
-        if '$ref' in json_schema and schema.get('type') == 'model':
-            # If we have a schema with a $ref, we actually need to update the _referenced_ schema
-            schema_to_update = self.get_schema_from_definitions(JsonRef(json_schema['$ref']))
-        if schema_to_update is not None:
-            # Do an in-place update to schema_to_update, regardless of whether the js_modify_function
-            # returns a new dict or modifies the old one
-            updated = metadata_handler.apply_js_modify_function(schema_to_update).copy()
-            schema_to_update.clear()
-            schema_to_update.update(updated)
-        else:
-            json_schema = metadata_handler.apply_js_modify_function(json_schema)
+        json_schema = metadata_handler.get_json_schema(schema, )
 
         # Resolve issues caused by sibling keys next to a top-level $ref (see `handle_ref_overrides` for details)
         json_schema = self.handle_ref_overrides(json_schema)
@@ -243,6 +211,35 @@ class GenerateJsonSchema:
             json_schema = ref_json_schema
 
         return json_schema
+
+    def generate_innerer(self, schema: CoreSchema | core_schema.TypedDictField | core_schema.DataclassField) -> JsonSchemaValue:
+        if _core_utils.is_typed_dict_field(schema):
+            handler = self.typed_dict_field_schema
+        elif _core_utils.is_dataclass_field(schema):
+            handler = self.dataclass_field_schema
+        elif _core_utils.is_core_schema(schema):  # Ideally we wouldn't need this redundant typeguard..
+            handler = self._schema_type_to_method[schema['type']]
+        else:
+            raise TypeError(f'Unexpected schema type: schema={schema}')
+
+        json_schema = handler(schema)
+
+        # Apply the modify_js function, if present
+        schema_to_update: JsonSchemaValue | None = None
+        if '$ref' in json_schema and schema.get('type') == 'model':
+            # If we have a schema with a $ref, we actually need to update the _referenced_ schema
+            schema_to_update = self.get_schema_from_definitions(JsonRef(json_schema['$ref']))
+        if schema_to_update is not None:
+            # Do an in-place update to schema_to_update, regardless of whether the js_modify_function
+            # returns a new dict or modifies the old one
+            updated =
+            updated = metadata_handler.apply_js_modify_function(schema_to_update).copy()
+            schema_to_update.clear()
+            schema_to_update.update(updated)
+        else:
+            json_schema = metadata_handler.apply_js_modify_function(json_schema)
+
+
 
     # ### Schema generation methods
     def any_schema(self, schema: core_schema.AnySchema) -> JsonSchemaValue:
