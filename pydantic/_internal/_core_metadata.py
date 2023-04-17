@@ -1,18 +1,17 @@
 from __future__ import annotations as _annotations
 
 import typing
-import warnings
 from typing import Any
 
 import typing_extensions
+from pydantic_core import CoreSchema, core_schema
 
 if typing.TYPE_CHECKING:
-    from pydantic_core import CoreSchema, core_schema
-
     from ..json_schema import JsonSchemaValue
 
-GetJsonSchemaHandler = typing.Callable[[CoreSchema], JsonSchemaValue]
-GetJsonSchemaFunction = typing.Callable[[CoreSchema, GetJsonSchemaHandler], JsonSchemaValue]
+CoreSchemaOrField = typing.Union[CoreSchema, core_schema.DataclassField, core_schema.TypedDictField]
+GetJsonSchemaHandler = typing.Callable[[CoreSchemaOrField], 'JsonSchemaValue']
+GetJsonSchemaFunction = typing.Callable[[CoreSchemaOrField, GetJsonSchemaHandler], 'JsonSchemaValue']
 
 
 class CoreMetadata(typing_extensions.TypedDict, total=False):
@@ -80,11 +79,16 @@ class CoreMetadataHandler:
 
         self.metadata['pydantic_js_function'] = compose_js_functions(outer_func, inner_func)
 
-    def get_json_schema(self, core_schema: CoreSchema, handler: GetJsonSchemaHandler) -> JsonSchemaValue:
+    def get_json_schema(
+        self,
+        core_schema: CoreSchema | core_schema.TypedDictField | core_schema.DataclassField,
+        handler: GetJsonSchemaHandler,
+    ) -> JsonSchemaValue:
         js_function = self.metadata.get('pydantic_js_function')
         if js_function is None:
             return handler(core_schema)
         return js_function(core_schema, handler)
+
 
 def build_metadata_dict(
     *,  # force keyword arguments to make it easier to modify this signature in a backwards-compatible way
@@ -116,7 +120,7 @@ def build_metadata_dict(
 def compose_js_functions(
     outer: GetJsonSchemaFunction | None,
     inner: GetJsonSchemaFunction | None,
-) -> typing.Callable[[JsonSchemaValue], JsonSchemaValue] | None:
+) -> GetJsonSchemaFunction | None:
     """
     Composes the provided `outer` and `inner` js_modify_functions.
 
@@ -128,7 +132,7 @@ def compose_js_functions(
         return outer
 
     def combined_js_function(
-        core_schema: CoreSchema, handler: typing.Callable[[CoreSchema], JsonSchemaValue]
+        core_schema: CoreSchemaOrField, handler: typing.Callable[[CoreSchemaOrField], JsonSchemaValue]
     ) -> JsonSchemaValue:
         return outer(core_schema, lambda cs: inner(cs, handler))
 

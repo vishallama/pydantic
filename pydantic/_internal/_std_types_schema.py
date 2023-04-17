@@ -78,9 +78,7 @@ def enum_schema(_schema_generator: GenerateSchema, enum_type: type[Enum]) -> cor
         description = None
     updates = {'title': enum_type.__name__, 'description': description}
     updates = {k: v for k, v in updates.items() if v is not None}
-    metadata = build_metadata_dict(
-        js_function=lambda _c, h: update_json_schema(h(literal_schema.copy()), updates)
-    )
+    metadata = build_metadata_dict(js_function=lambda _c, h: update_json_schema(h(literal_schema.copy()), updates))
 
     lax: CoreSchema
     json_type: Literal['int', 'float', 'str']

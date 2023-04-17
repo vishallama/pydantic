@@ -28,7 +28,7 @@ from typing import (
 from uuid import UUID
 
 import pytest
-from pydantic_core import core_schema
+from pydantic_core import core_schema, CoreSchema
 from typing_extensions import Annotated, Literal
 
 from pydantic import (
@@ -38,7 +38,7 @@ from pydantic import (
     ValidationError,
     field_validator,
 )
-from pydantic._internal._core_metadata import build_metadata_dict
+from pydantic._internal._core_metadata import build_metadata_dict, CoreSchemaOrField, GetJsonSchemaHandler
 from pydantic.color import Color
 from pydantic.config import ConfigDict
 from pydantic.dataclasses import dataclass
@@ -48,7 +48,7 @@ from pydantic.json_schema import (
     GenerateJsonSchema,
     PydanticJsonSchemaWarning,
     model_json_schema,
-    models_json_schema,
+    models_json_schema, JsonSchemaValue,
 )
 from pydantic.networks import AnyUrl, EmailStr, IPvAnyAddress, IPvAnyInterface, IPvAnyNetwork, NameEmail
 from pydantic.types import (
@@ -264,7 +264,8 @@ def test_enum_modify_schema():
         bar = 'b'
 
         @classmethod
-        def __pydantic_modify_json_schema__(cls, field_schema):
+        def __pydantic_modify_json_schema__(cls, core_schema: CoreSchema, handler: GetJsonSchemaHandler) -> JsonSchemaValue:
+            field_schema = handler(core_schema)
             existing_comment = field_schema.get('$comment', '')
             field_schema['$comment'] = existing_comment + 'comment'  # make sure this function is only called once
 
@@ -2096,7 +2097,9 @@ def test_schema_attributes():
 def test_path_modify_schema():
     class MyPath(Path):
         @classmethod
-        def __pydantic_modify_json_schema__(cls, schema):
+        def __pydantic_modify_json_schema__(cls, core_schema: core_schema.CoreSchema,
+                                            handler: GetJsonSchemaHandler) -> JsonSchemaValue:
+            schema = handler(core_schema)
             schema.update(foobar=123)
             return schema
 
@@ -2282,7 +2285,7 @@ def test_schema_for_generic_field():
         ) -> core_schema.PlainValidatorFunctionSchema:
             source_args = getattr(source, '__args__', [Any])
             param = source_args[0]
-            metadata = build_metadata_dict(js_cs_override=handler(param))
+            metadata = build_metadata_dict(js_function=lambda _c, h: h(handler(param)))
             return core_schema.general_plain_validator_function(
                 GenModel,
                 metadata=metadata,
@@ -2309,7 +2312,9 @@ def test_schema_for_generic_field():
 
     class GenModelModified(GenModel, Generic[T]):
         @classmethod
-        def __pydantic_modify_json_schema__(cls, field_schema):
+        def __pydantic_modify_json_schema__(cls, core_schema: core_schema.CoreSchema,
+                                            handler: GetJsonSchemaHandler) -> JsonSchemaValue:
+            field_schema = handler(core_schema)
             type = field_schema.pop('type', 'other')
             field_schema.update(anyOf=[{'type': type}, {'type': 'array', 'items': {'type': type}}])
             return field_schema
@@ -2379,14 +2384,17 @@ def test_advanced_generic_schema():
         ) -> core_schema.CoreSchema:
             if hasattr(source, '__args__'):
                 param = source.__args__[0]
-                metadata = build_metadata_dict(js_cs_override=handler(Optional[param]))
+                metadata = build_metadata_dict(js_function=lambda _c, h: h(handler(Optional[param])))
                 return core_schema.general_plain_validator_function(
                     Gen,
                     metadata=metadata,
                 )
 
         @classmethod
-        def __pydantic_modify_json_schema__(cls, field_schema: core_schema.CoreSchema) -> core_schema.CoreSchema:
+        def __pydantic_modify_json_schema__(cls, core_schema: core_schema.CoreSchema,
+                                            handler: GetJsonSchemaHandler) -> JsonSchemaValue:
+            # return {}
+            field_schema = {}
             the_type = field_schema.pop('anyOf', [{'type': 'string'}])[0]
             field_schema.update(title='Gen title', anyOf=[the_type, {'type': 'array', 'items': the_type}])
             return field_schema
@@ -2409,7 +2417,7 @@ def test_advanced_generic_schema():
             cls, source: Any, handler: Callable[[Any], core_schema.CoreSchema], **_kwargs: Any
         ) -> core_schema.CoreSchema:
             if hasattr(source, '__args__'):
-                metadata = build_metadata_dict(js_cs_override=handler(Tuple[source.__args__]))
+                metadata = build_metadata_dict(js_function=lambda _c, h: h(handler(Tuple[source.__args__])))
                 return core_schema.general_plain_validator_function(
                     GenTwoParams,
                     metadata=metadata,
@@ -2417,7 +2425,9 @@ def test_advanced_generic_schema():
             return handler(source)
 
         @classmethod
-        def __pydantic_modify_json_schema__(cls, field_schema: core_schema.CoreSchema) -> core_schema.CoreSchema:
+        def __pydantic_modify_json_schema__(cls, core_schema: core_schema.CoreSchema,
+                                            handler: GetJsonSchemaHandler) -> JsonSchemaValue:
+            field_schema = handler(core_schema)
             field_schema.pop('minItems')
             field_schema.pop('maxItems')
             field_schema.update(examples='examples')
@@ -2606,9 +2616,9 @@ def test_complex_nested_generic():
 def test_modify_schema_dict_keys() -> None:
     class MyType:
         @classmethod
-        def __pydantic_modify_json_schema__(cls, schema):
-            schema['test'] = 'passed'
-            return schema
+        def __pydantic_modify_json_schema__(cls, core_schema: core_schema.CoreSchema,
+                                            handler: GetJsonSchemaHandler) -> JsonSchemaValue:
+            return {'test': 'passed'}
 
     class MyModel(BaseModel):
         my_field: Dict[str, MyType]

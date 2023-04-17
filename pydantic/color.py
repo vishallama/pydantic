@@ -15,6 +15,8 @@ from typing import Any, Callable, Dict, Optional, Tuple, Type, Union, cast
 from pydantic_core import CoreSchema, PydanticCustomError, core_schema
 
 from ._internal import _repr, _utils
+from ._internal._core_metadata import GetJsonSchemaHandler
+from .json_schema import JsonSchemaValue
 
 ColorTuple = Union[Tuple[int, int, int], Tuple[int, int, int, float]]
 ColorType = Union[ColorTuple, str]
@@ -88,7 +90,9 @@ class Color(_repr.Representation):
         self._original = value
 
     @classmethod
-    def __pydantic_modify_json_schema__(cls, field_schema: Dict[str, Any]) -> Dict[str, Any]:
+    def __pydantic_modify_json_schema__(cls, core_schema: core_schema.CoreSchema,
+                                        handler: GetJsonSchemaHandler) -> JsonSchemaValue:
+        field_schema = {}
         field_schema.update(type='string', format='color')
         return field_schema
 
