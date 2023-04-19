@@ -7,11 +7,11 @@ import typing_extensions
 from pydantic_core import CoreSchema, core_schema
 
 if typing.TYPE_CHECKING:
-    from ..json_schema import JsonSchemaValue
+    from ..json_schema import JsonSchemaRefs, JsonSchemaValue
 
 CoreSchemaOrField = typing.Union[CoreSchema, core_schema.DataclassField, core_schema.TypedDictField]
 GetJsonSchemaHandler = typing.Callable[[CoreSchemaOrField], 'JsonSchemaValue']
-GetJsonSchemaFunction = typing.Callable[[CoreSchemaOrField, GetJsonSchemaHandler], 'JsonSchemaValue']
+GetJsonSchemaFunction = typing.Callable[[CoreSchemaOrField, 'JsonSchemaRefs', GetJsonSchemaHandler], 'JsonSchemaValue']
 
 
 class CoreMetadata(typing_extensions.TypedDict, total=False):
@@ -19,7 +19,7 @@ class CoreMetadata(typing_extensions.TypedDict, total=False):
     # This is generally obtained from a `__pydantic_update_schema__` function
     pydantic_cs_update_function: UpdateCoreSchemaCallable | None
 
-    pydantic_js_function: GetJsonSchemaFunction | None
+    pydantic_js_functions: list[GetJsonSchemaFunction]
 
     # If `pydantic_js_prefer_positional_arguments` is True, the JSON schema generator will
     # prefer positional over keyword arguments for an 'arguments' schema.
@@ -63,22 +63,6 @@ class CoreMetadataHandler:
             raise TypeError(f'CoreSchema metadata should be a dict; got {metadata!r}.')
         return metadata  # type: ignore[return-value]
 
-    def compose_js_functions(self, js_function: GetJsonSchemaFunction | None, inner: bool = False) -> None:
-        """
-        Composes the provided js_modify_function with the existing js_modify_function.
-
-        This operation is performed in-place and modifies the wrapped schema's metadata.
-
-        If `inner` is True, the provided js_modify_function will be called on the input schema first.
-        """
-
-        if inner:
-            outer_func, inner_func = self.metadata.get('pydantic_js_function'), js_function
-        else:
-            outer_func, inner_func = js_function, self.metadata.get('pydantic_js_function')
-
-        self.metadata['pydantic_js_function'] = compose_js_functions(outer_func, inner_func)
-
     def get_json_schema(
         self,
         core_schema: CoreSchema | core_schema.TypedDictField | core_schema.DataclassField,
@@ -93,7 +77,7 @@ class CoreMetadataHandler:
 def build_metadata_dict(
     *,  # force keyword arguments to make it easier to modify this signature in a backwards-compatible way
     cs_update_function: UpdateCoreSchemaCallable | None = None,
-    js_function: GetJsonSchemaFunction | None = None,
+    js_functions: list[GetJsonSchemaFunction] | None = None,
     js_prefer_positional_arguments: bool | None = None,
     initial_metadata: Any | None = None,
 ) -> Any:
@@ -106,7 +90,7 @@ def build_metadata_dict(
 
     metadata = CoreMetadata(
         pydantic_cs_update_function=cs_update_function,
-        pydantic_js_function=js_function,
+        pydantic_js_functions=js_functions or [],
         pydantic_js_prefer_positional_arguments=js_prefer_positional_arguments,
     )
     metadata = {k: v for k, v in metadata.items() if v is not None}  # type: ignore[assignment]
@@ -115,25 +99,3 @@ def build_metadata_dict(
         metadata = {**initial_metadata, **metadata}  # type: ignore[misc]
 
     return metadata
-
-
-def compose_js_functions(
-    outer: GetJsonSchemaFunction | None,
-    inner: GetJsonSchemaFunction | None,
-) -> GetJsonSchemaFunction | None:
-    """
-    Composes the provided `outer` and `inner` js_modify_functions.
-
-    The `outer` function will be called on the result of calling the `inner` function on the provided schema.
-    """
-    if outer is None:
-        return inner
-    if inner is None:
-        return outer
-
-    def combined_js_function(
-        core_schema: CoreSchemaOrField, handler: typing.Callable[[CoreSchemaOrField], JsonSchemaValue]
-    ) -> JsonSchemaValue:
-        return outer(core_schema, lambda cs: inner(cs, handler))
-
-    return combined_js_function
