@@ -12,6 +12,8 @@ from weakref import WeakValueDictionary
 
 import typing_extensions
 
+from pydantic.errors import PydanticUndefinedAnnotation
+
 from ._core_utils import get_type_ref
 from ._forward_ref import PydanticForwardRef, PydanticRecursiveRef
 from ._typing_extra import TypeVarType, typing_base
@@ -125,10 +127,35 @@ class BaseModelGenericAlias(types.GenericAlias):
             return BaseModelGenericAlias(self.__origin__, new.__args__)
         # no generic parameters left, delegate back to BaseModel to return
         # a concrete model
-        return create_generic_concrete_submodel(  # type: ignore
-            new.__origin__,
-            new.__args__,
-        )
+        if type(__typeargs) is not tuple:  # __typeargs might not be usable in isinstance
+            __typeargs = (__typeargs,)
+        with generic_recursion_self_type(new.__origin__, new.__args__) as maybe_self_type:
+            if maybe_self_type is not None:
+                return maybe_self_type
+
+            cached = get_cached_generic_type_late(self.__origin__, __typeargs, new.__origin__, new.__args__)
+            if cached is not None:
+                return cached
+
+            # Attempt to rebuild the origin in case new types have been defined
+            try:
+                # depth 3 gets you above this __class_getitem__ call
+                self.__origin__.model_rebuild(_parent_namespace_depth=3)
+            except PydanticUndefinedAnnotation:
+                # It's okay if it fails, it just means there are still undefined types
+                # that could be evaluated later.
+                # TODO: Presumably we should error if validation is attempted here?
+                pass
+
+            submodel = create_generic_concrete_submodel(  # type: ignore
+                new.__origin__,
+                new.__args__,
+            )
+
+            # Update cache
+            set_cached_generic_type(self.__origin__, __typeargs, submodel, new.__origin__, new.__args__)
+
+        return submodel
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         model = create_generic_concrete_submodel(  # type: ignore

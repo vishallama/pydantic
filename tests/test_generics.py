@@ -1906,9 +1906,7 @@ def test_generic_subclass_with_extra_type_requires_all_params():
 
     with pytest.raises(
         TypeError,
-        match=re.escape(
-            'All parameters must be present on typing.Generic; you should inherit from typing.Generic[~T, ~S]'
-        ),
+        match=re.escape('Some type variables (~T) are not listed in Generic[~S]'),
     ):
 
         class B(A[T], Generic[S]):
