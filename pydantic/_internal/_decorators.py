@@ -13,7 +13,6 @@ from typing_extensions import Literal, TypeAlias
 
 from ..errors import PydanticUserError
 from ..fields import ComputedFieldInfo
-from ._core_utils import get_type_ref
 from ._internal_dataclass import slots_dataclass
 
 if TYPE_CHECKING:
@@ -192,7 +191,7 @@ class Decorator(Generic[DecoratorInfoType]):
         if shim is not None:
             func = shim(func)
         return Decorator(
-            cls_ref=get_type_ref(cls_),
+            cls_ref=f'{cls_.__module__}.{cls_.__name__}',
             cls_var_name=cls_var_name,
             func=func,
             shim=shim,

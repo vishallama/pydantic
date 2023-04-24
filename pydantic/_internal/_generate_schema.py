@@ -55,7 +55,7 @@ from ._fields import (
     get_type_hints_infer_globalns,
 )
 from ._forward_ref import PydanticForwardRef, PydanticRecursiveRef
-from ._generics import get_standard_typevars_map, recursively_defined_type_refs, replace_types
+from ._generics import BaseModelGenericAlias, get_standard_typevars_map, recursively_defined_type_refs, replace_types
 from ._typing_extra import is_finalvar
 from ._utils import lenient_issubclass
 
@@ -144,8 +144,6 @@ def apply_each_item_validators(
 
 
 class GenerateSchema:
-    __slots__ = '_config_wrapper_stack', 'types_namespace', 'typevars_map', 'recursion_cache', 'definitions'
-
     def __init__(
         self,
         config_wrapper: ConfigWrapper,
@@ -159,6 +157,7 @@ class GenerateSchema:
 
         self.recursion_cache: dict[str, core_schema.DefinitionReferenceSchema] = {}
         self.definitions: dict[str, core_schema.CoreSchema] = {}
+        self._cache: dict[Any, core_schema.CoreSchema] = {}
 
     @property
     def config_wrapper(self) -> ConfigWrapper:
@@ -168,8 +167,8 @@ class GenerateSchema:
     def arbitrary_types(self) -> bool:
         return self.config_wrapper.arbitrary_types_allowed
 
-    def generate_schema(self, obj: Any) -> core_schema.CoreSchema:
-        schema = self._generate_schema(obj, from_dunder_get_core_schema=True)
+    def generate_schema(self, obj: Any, from_dunder_get_core_schema: bool = True) -> core_schema.CoreSchema:
+        schema = self._generate_schema(obj, from_dunder_get_core_schema)
 
         schema = remove_unnecessary_invalid_definitions(schema)
 
@@ -332,6 +331,10 @@ class GenerateSchema:
                 model_ref = get_type_ref(resolved_model)
                 return core_schema.definition_reference_schema(model_ref)
 
+        if isinstance(obj, BaseModelGenericAlias):
+            # an incomplete generic model
+            return self.model_schema(obj.__origin__)
+
         try:
             if obj in {bool, int, float, str, bytes, list, set, frozenset, dict}:
                 # Note: obj may fail to be hashable if it has an unhashable annotation
@@ -408,9 +411,10 @@ class GenerateSchema:
         if _typing_extra.is_dataclass(origin):
             return self._dataclass_schema(obj, origin)
 
-        from_property = self._generate_schema_from_property(origin, obj)
-        if from_property is not None:
-            return from_property
+        if from_dunder_get_core_schema:
+            from_property = self._generate_schema_from_property(origin, obj)
+            if from_property is not None:
+                return from_property
 
         if _typing_extra.origin_is_union(origin):
             return self._union_schema(obj)

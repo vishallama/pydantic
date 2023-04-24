@@ -151,7 +151,10 @@ def collect_model_fields(  # noqa: C901
 
         # when building a generic model with `MyModel[int]`, the generic_origin check makes sure we don't get
         # "... shadows an attribute" errors
-        generic_origin = getattr(cls, '__pydantic_generic_metadata__', {}).get('origin')
+        if hasattr(cls, '__pydantic_generic_metadata__'):
+            generic_origin = getattr(cls, '__pydantic_generic_metadata__').__origin__
+        else:
+            generic_origin = None
         for base in bases:
             if hasattr(base, ann_name):
                 if base is generic_origin:

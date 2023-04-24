@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Any, Callable, Union, cast
 
 from pydantic_core import CoreSchema, CoreSchemaType, core_schema
@@ -67,10 +68,11 @@ def get_type_ref(type_: type[Any], args_override: tuple[type[Any], ...] | None =
     """
     origin = type_
     args = args_override or ()
-    generic_metadata = getattr(type_, '__pydantic_generic_metadata__', None)
-    if generic_metadata:
-        origin = generic_metadata['origin'] or origin
-        args = generic_metadata['args'] or args
+    from pydantic.main import BaseModel
+
+    if inspect.isclass(type_) and issubclass(type_, BaseModel):
+        origin = type_.__pydantic_generic_metadata__.__origin__
+        args = type_.__pydantic_generic_metadata__.__args__
 
     module_name = getattr(origin, '__module__', '<No __module__>')
     qualname = getattr(origin, '__qualname__', f'<No __qualname__: {origin}>')

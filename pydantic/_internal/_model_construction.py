@@ -176,7 +176,7 @@ def complete_model_class(
         typevars_map,
     )
     try:
-        schema = cls.__get_pydantic_core_schema__(cls, gen_schema.generate_schema)
+        schema = cls.__get_pydantic_core_schema__(cls, lambda tp: gen_schema.generate_schema(tp, False))
     except PydanticUndefinedAnnotation as e:
         if raise_errors:
             raise

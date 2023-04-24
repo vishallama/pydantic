@@ -23,14 +23,13 @@ from ._internal import (
     _model_construction,
     _repr,
     _typing_extra,
-    _utils,
 )
 from ._internal._fields import Undefined
 from ._migration import getattr_migration
 from .config import ConfigDict
 from .deprecated import copy_internals as _deprecated_copy_internals
 from .deprecated import parse as _deprecated_parse
-from .errors import PydanticUndefinedAnnotation, PydanticUserError
+from .errors import PydanticUserError
 from .fields import ComputedFieldInfo, Field, FieldInfo, ModelPrivateAttr
 from .json_schema import DEFAULT_REF_TEMPLATE, GenerateJsonSchema, JsonSchemaValue, model_json_schema
 
@@ -72,12 +71,12 @@ class _ModelNamespaceDict(dict):  # type: ignore[type-arg]
 
 @typing_extensions.dataclass_transform(kw_only_default=True, field_specifiers=(Field,))
 class ModelMetaclass(ABCMeta):
-    def __new__(
+    def __new__(  # noqa: C901
         mcs,
         cls_name: str,
         bases: tuple[type[Any], ...],
         namespace: dict[str, Any],
-        __pydantic_generic_metadata__: _generics.PydanticGenericMetadata | None = None,
+        __pydantic_generic_metadata__: _generics.BaseModelGenericAlias | None = None,
         __pydantic_reset_parent_namespace__: bool = True,
         **kwargs: Any,
     ) -> type:
@@ -123,30 +122,31 @@ class ModelMetaclass(ABCMeta):
             cls.__pydantic_decorators__ = _decorators.DecoratorInfos.build(cls)
 
             # Use the getattr below to grab the __parameters__ from the `typing.Generic` parent class
-            if __pydantic_generic_metadata__:
+            if __pydantic_generic_metadata__ is not None:
                 cls.__pydantic_generic_metadata__ = __pydantic_generic_metadata__
             else:
                 parameters = getattr(cls, '__parameters__', ())
-                parent_parameters = getattr(cls, '__pydantic_generic_metadata__', {}).get('parameters', ())
-                if parameters and parent_parameters and not all(x in parameters for x in parent_parameters):
-                    combined_parameters = parent_parameters + tuple(x for x in parameters if x not in parent_parameters)
-                    parameters_str = ', '.join([str(x) for x in combined_parameters])
-                    error_message = (
-                        f'All parameters must be present on typing.Generic;'
-                        f' you should inherit from typing.Generic[{parameters_str}]'
-                    )
-                    if Generic not in bases:  # pragma: no cover
-                        # This branch will only be hit if I have misunderstood how `__parameters__` works.
-                        # If that is the case, and a user hits this, I could imagine it being very helpful
-                        # to have this extra detail in the reported traceback.
-                        error_message += f' (bases={bases})'
-                    raise TypeError(error_message)
+                if hasattr(cls, '__pydantic_generic_metadata__'):
+                    parent_parameters = cls.__pydantic_generic_metadata__.__parameters__
+                else:
+                    parent_parameters = ()
+                combined_parameters = parent_parameters + tuple(x for x in parameters if x not in parent_parameters)
+                if combined_parameters:
+                    # this is a generic model
+                    if not all(x in parameters for x in parent_parameters):
+                        parameters_str = ', '.join([str(x) for x in combined_parameters])
+                        error_message = (
+                            f'All parameters must be present on typing.Generic;'
+                            f' you should inherit from typing.Generic[{parameters_str}]'
+                        )
+                        if Generic not in bases:  # pragma: no cover
+                            # This branch will only be hit if I have misunderstood how `__parameters__` works.
+                            # If that is the case, and a user hits this, I could imagine it being very helpful
+                            # to have this extra detail in the reported traceback.
+                            error_message += f' (bases={bases})'
+                        raise TypeError(error_message)
 
-                cls.__pydantic_generic_metadata__ = {
-                    'origin': None,
-                    'args': (),
-                    'parameters': parameters,
-                }
+                cls.__pydantic_generic_metadata__ = _generics.BaseModelGenericAlias(cls, combined_parameters)
 
             cls.__pydantic_model_complete__ = False  # Ensure this specific class gets completed
 
@@ -163,6 +163,7 @@ class ModelMetaclass(ABCMeta):
 
             types_namespace = _typing_extra.get_cls_types_namespace(cls, parent_namespace)
             _model_construction.set_model_fields(cls, bases, types_namespace)
+            # if not cls.__pydantic_generic_metadata__.__parameters__:
             _model_construction.complete_model_class(
                 cls,
                 cls_name,
@@ -205,7 +206,7 @@ class BaseModel(_repr.Representation, metaclass=ModelMetaclass):
         __private_attributes__: typing.ClassVar[dict[str, ModelPrivateAttr]]
         __class_vars__: typing.ClassVar[set[str]]
         __pydantic_fields_set__: set[str] = set()
-        __pydantic_generic_metadata__: typing.ClassVar[_generics.PydanticGenericMetadata]
+        __pydantic_generic_metadata__: typing.ClassVar[_generics.BaseModelGenericAlias]
         __pydantic_parent_namespace__: typing.ClassVar[dict[str, Any] | None]
     else:
         __pydantic_validator__ = _model_construction.MockValidator(
@@ -240,7 +241,7 @@ class BaseModel(_repr.Representation, metaclass=ModelMetaclass):
             # Due to the way generic classes are built, it's possible that an invalid schema may be temporarily
             # set on generic classes. I think we could resolve this to ensure that we get proper schema caching
             # for generics, but for simplicity for now, we just always rebuild if the class has a generic origin.
-            if not cls.__pydantic_generic_metadata__['origin']:
+            if not cls.__pydantic_generic_metadata__.__origin__:
                 return cls.__pydantic_core_schema__
 
         return __handler(__source)
@@ -498,10 +499,7 @@ class BaseModel(_repr.Representation, metaclass=ModelMetaclass):
         # When comparing instances of generic types for equality, as long as all field values are equal,
         # only require their generic origin types to be equal, rather than exact type equality.
         # This prevents headaches like MyGeneric(x=1) != MyGeneric[Any](x=1).
-        self_type = self.__pydantic_generic_metadata__['origin'] or self.__class__
-        other_type = other.__pydantic_generic_metadata__['origin'] or other.__class__
-
-        if self_type != other_type:
+        if self.__pydantic_generic_metadata__.__origin__ != other.__pydantic_generic_metadata__.__origin__:
             return False
 
         if self.__dict__ != other.__dict__:
@@ -569,67 +567,24 @@ class BaseModel(_repr.Representation, metaclass=ModelMetaclass):
 
     def __class_getitem__(
         cls, typevar_values: type[Any] | tuple[type[Any], ...]
-    ) -> type[BaseModel] | _forward_ref.PydanticForwardRef | _forward_ref.PydanticRecursiveRef:
-        cached = _generics.get_cached_generic_type_early(cls, typevar_values)
-        if cached is not None:
-            return cached
-
+    ) -> (
+        _forward_ref.PydanticForwardRef
+        | _forward_ref.PydanticRecursiveRef
+        | _generics.BaseModelGenericAlias
+        | type[BaseModel]
+        | type[_generics.BaseModelGenericAlias]
+    ):
         if cls is BaseModel:
             raise TypeError('Type parameters should be placed on typing.Generic, not BaseModel')
         if not hasattr(cls, '__parameters__'):
             raise TypeError(f'{cls} cannot be parametrized because it does not inherit from typing.Generic')
-        if not cls.__pydantic_generic_metadata__['parameters'] and Generic not in cls.__bases__:
+        if not cls.__pydantic_generic_metadata__.__parameters__ and Generic not in cls.__bases__:
             raise TypeError(f'{cls} is not a generic class')
 
         if not isinstance(typevar_values, tuple):
             typevar_values = (typevar_values,)
-        _generics.check_parameters_count(cls, typevar_values)
 
-        # Build map from generic typevars to passed params
-        typevars_map: dict[_typing_extra.TypeVarType, type[Any]] = dict(
-            zip(cls.__pydantic_generic_metadata__['parameters'], typevar_values)
-        )
-
-        if _utils.all_identical(typevars_map.keys(), typevars_map.values()) and typevars_map:
-            submodel = cls  # if arguments are equal to parameters it's the same object
-            _generics.set_cached_generic_type(cls, typevar_values, submodel)
-        else:
-            parent_args = cls.__pydantic_generic_metadata__['args']
-            if not parent_args:
-                args = typevar_values
-            else:
-                args = tuple(_generics.replace_types(arg, typevars_map) for arg in parent_args)
-
-            origin = cls.__pydantic_generic_metadata__['origin'] or cls
-            model_name = origin.model_parametrized_name(args)
-            params = tuple(
-                {param: None for param in _generics.iter_contained_typevars(typevars_map.values())}
-            )  # use dict as ordered set
-
-            with _generics.generic_recursion_self_type(origin, args) as maybe_self_type:
-                if maybe_self_type is not None:
-                    return maybe_self_type
-
-                cached = _generics.get_cached_generic_type_late(cls, typevar_values, origin, args)
-                if cached is not None:
-                    return cached
-
-                # Attempt to rebuild the origin in case new types have been defined
-                try:
-                    # depth 3 gets you above this __class_getitem__ call
-                    origin.model_rebuild(_parent_namespace_depth=3)
-                except PydanticUndefinedAnnotation:
-                    # It's okay if it fails, it just means there are still undefined types
-                    # that could be evaluated later.
-                    # TODO: Presumably we should error if validation is attempted here?
-                    pass
-
-                submodel = _generics.create_generic_submodel(model_name, origin, args, params)
-
-                # Update cache
-                _generics.set_cached_generic_type(cls, typevar_values, submodel, origin, args)
-
-        return submodel
+        return cls.__pydantic_generic_metadata__[typevar_values]
 
     @classmethod
     def model_parametrized_name(cls, params: tuple[type[Any], ...]) -> str:

@@ -708,7 +708,7 @@ def test_wildcard_validator_error():
 def test_invalid_field():
     msg = (
         r'Validators defined with incorrect fields:'
-        r' tests.test_validators.test_invalid_field.<locals>.Model:\d+.check_b'
+        r' tests.test_validators.Model.check_b'
         r" \(use check_fields=False if you're inheriting from the model and intended this\)"
     )
     with pytest.raises(errors.PydanticUserError, match=msg):
