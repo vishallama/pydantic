@@ -296,7 +296,7 @@ def test_parameter_count():
     error_message = str(exc_info.value)
     assert error_message.startswith('Too many parameters') or error_message.startswith('Too many arguments')
     assert error_message.endswith(
-        " for <class 'tests.test_generics.test_parameter_count.<locals>.Model'>; actual 3, expected 2"
+        " for tests.test_generics.test_parameter_count.<locals>.Model[~T, ~S]; actual 3, expected 2"
     )
 
 
@@ -704,10 +704,10 @@ def test_partial_specification_with_inner_typevar():
         b: List[BT]
 
     partial_model = Model[int, BT]
-    assert partial_model.__pydantic_generic_metadata__['parameters']
+    assert partial_model.__pydantic_generic_metadata__.__parameters__
     concrete_model = partial_model[int]
 
-    assert not concrete_model.__pydantic_generic_metadata__['parameters']
+    assert not concrete_model.__pydantic_generic_metadata__.__parameters__
 
     # nested resolution of partial models should work as expected
     nested_resolved = concrete_model(a=['123'], b=['456'])
@@ -724,9 +724,9 @@ def test_partial_specification_name():
         b: BT
 
     partial_model = Model[int, BT]
-    assert partial_model.__name__ == 'Model[int, ~BT]'
+    assert repr(partial_model) == 'tests.test_generics.test_partial_specification_name.<locals>.Model[int, ~BT]'
     concrete_model = partial_model[str]
-    assert concrete_model.__name__ == 'Model[int, str]'
+    assert repr(concrete_model) == 'tests.test_generics.test_partial_specification_name.<locals>.Model[int, str]'
 
 
 def test_partial_specification_instantiation():
@@ -1241,8 +1241,8 @@ def test_deep_generic():
     generic_model(a={}, b=NormalModel(e=1, f='a'), c=1, d=1.5)
     generic_model(a={}, b=1, c=1, d=1.5)
 
-    assert InnerModel.__pydantic_generic_metadata__['parameters']  # i.e., InnerModel is not concrete
-    assert not inner_model.__pydantic_generic_metadata__['parameters']  # i.e., inner_model is concrete
+    assert InnerModel.__pydantic_generic_metadata__.__parameters__
+    assert not inner_model.__pydantic_generic_metadata__.__parameters__  # i.e., inner_model is concrete
 
 
 def test_deep_generic_with_inner_typevar():
@@ -1254,8 +1254,8 @@ def test_deep_generic_with_inner_typevar():
     class InnerModel(OuterModel[T], Generic[T]):
         pass
 
-    assert not InnerModel[int].__pydantic_generic_metadata__['parameters']  # i.e., InnerModel[int] is concrete
-    assert InnerModel.__pydantic_generic_metadata__['parameters']  # i.e., InnerModel is not concrete
+    assert not InnerModel[int].__pydantic_generic_metadata__.__parameters__  # i.e., InnerModel[int] is concrete
+    assert InnerModel.__pydantic_generic_metadata__.__parameters__  # i.e., InnerModel is not concrete
 
     with pytest.raises(ValidationError):
         InnerModel[int](a=['wrong'])
@@ -1275,8 +1275,8 @@ def test_deep_generic_with_referenced_generic():
     class InnerModel(OuterModel[T], Generic[T]):
         pass
 
-    assert not InnerModel[int].__pydantic_generic_metadata__['parameters']
-    assert InnerModel.__pydantic_generic_metadata__['parameters']
+    assert not InnerModel[int].__pydantic_generic_metadata__.__parameters__
+    assert InnerModel.__pydantic_generic_metadata__.__parameters__
 
     with pytest.raises(ValidationError):
         InnerModel[int](a={'a': 'wrong'})
@@ -1295,8 +1295,8 @@ def test_deep_generic_with_referenced_inner_generic():
     class InnerModel(OuterModel[T], Generic[T]):
         pass
 
-    assert not InnerModel[int].__pydantic_generic_metadata__['parameters']
-    assert InnerModel.__pydantic_generic_metadata__['parameters']
+    assert not InnerModel[int].__pydantic_generic_metadata__.__parameters__
+    assert InnerModel.__pydantic_generic_metadata__.__parameters__
 
     with pytest.raises(ValidationError):
         InnerModel[int](a=['s', {'a': 'wrong'}])
@@ -1398,8 +1398,8 @@ def test_generic_with_callable():
         # Callable is a test for any type that accepts a list as an argument
         some_callable: Callable[[Optional[int], T], None]
 
-    assert not Model[str].__pydantic_generic_metadata__['parameters']
-    assert Model.__pydantic_generic_metadata__['parameters']
+    assert not Model[str].__pydantic_generic_metadata__.__parameters__
+    assert Model.__pydantic_generic_metadata__.__parameters__
 
 
 def test_generic_with_partial_callable():
@@ -1412,8 +1412,8 @@ def test_generic_with_partial_callable():
         # Callable is a test for any type that accepts a list as an argument
         some_callable: Callable[[Optional[int], str], None]
 
-    assert Model[str, U].__pydantic_generic_metadata__['parameters'] == (U,)
-    assert not Model[str, int].__pydantic_generic_metadata__['parameters']
+    assert Model[str, U].__pydantic_generic_metadata__.__parameters__ == (U,)
+    assert not Model[str, int].__pydantic_generic_metadata__.__parameters__
 
 
 def test_generic_recursive_models(create_module):
@@ -2050,7 +2050,6 @@ def test_generics_memory_use():
             pass
 
 
-@pytest.mark.xfail(reason='Generic models are not type aliases', raises=TypeError)
 def test_generic_model_as_parameter_to_generic_type_alias() -> None:
     T = TypeVar('T')
 
