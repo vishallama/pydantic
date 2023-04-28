@@ -1,0 +1,25 @@
+name: pull request comment
+on:
+  issue_comment:
+    types: [created, edited, deleted]
+jobs:
+ run_example:
+   if: contains(github.event.comment.body, 'please run this example')
+   runs-on: ubuntu-latest
+   steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - run: |
+       TAG=$(echo '${{ github.event.comment.body }} | python .github/workflows/run_example.py get-tag')
+       pip install git+https://github.com/pydantic/pydantic.git@${TAG}
+       echo '${{ github.event.comment.body }} | timeout 5 --kill-after=10 python .github/workflows/run_example.py evaluate > out.txt
+       echo "EVAL_OUTPUT='$(cat out.txt)'" >> $GITHUB_ENV
+
+    - name: Add comment
+      uses: peter-evans/create-or-update-comment@v3.0.0
+      with:
+        issue-number: ${{ github.event.issue.number }}
+        body: ${{ env.EVAL_OUTPUT }}
