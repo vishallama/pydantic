@@ -529,7 +529,7 @@ class GenerateSchema:
         required: bool = True,
     ) -> core_schema.ModelField:
         """
-        Prepare a TypedDictField to represent a model or typeddict field.
+        Prepare a ModelField to represent a model field.
         """
         common_field = self._common_field_schema(name, field_info, decorators)
         return core_schema.model_field(
