@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Callable, TypeVar, Union, cast
+from typing import Any, Callable, Iterable, TypeVar, Union, cast
 
 from pydantic_core import CoreSchema, core_schema
 from typing_extensions import TypeGuard, get_args
@@ -421,14 +421,14 @@ def walk_core_schema(schema: core_schema.CoreSchema, f: Walk) -> core_schema.Cor
     return f(schema.copy(), _dispatch)
 
 
-def simplify_schema_references(schema: core_schema.CoreSchema) -> core_schema.CoreSchema:  # noqa: C901
-    """
-    Simplify schema references by:
-      1. Grouping all definitions into a single top-level `definitions` schema, similar to a JSON schema's `#/$defs`.
-      2. Inlining any definitions that are only referenced in one place and are not involved in a cycle.
-      3. Removing any unused `ref` references from schemas.
-    """
+def _simplify_schema_references(schema: core_schema.CoreSchema, inline: bool) -> core_schema.CoreSchema:  # noqa: C901
     all_defs: dict[str, core_schema.CoreSchema] = {}
+
+    def make_result(schema: core_schema.CoreSchema, defs: Iterable[core_schema.CoreSchema]) -> core_schema.CoreSchema:
+        definitions = list(defs)
+        if definitions:
+            return core_schema.definitions_schema(schema=schema, definitions=definitions)
+        return schema
 
     def get_ref(s: core_schema.CoreSchema) -> None | str:
         return s.get('ref', None)
@@ -462,6 +462,9 @@ def simplify_schema_references(schema: core_schema.CoreSchema) -> core_schema.Co
         return s
 
     schema = walk_core_schema(schema, flatten_refs)
+
+    if not inline:
+        return make_result(schema, all_defs.values())
 
     ref_counts: dict[str, int] = defaultdict(int)
     involved_in_recursion: dict[str, bool] = {}
@@ -504,7 +507,21 @@ def simplify_schema_references(schema: core_schema.CoreSchema) -> core_schema.Co
     schema = walk_core_schema(schema, inline_refs)
 
     definitions = [d for d in all_defs.values() if ref_counts[d['ref']] > 0]  # type: ignore
+    return make_result(schema, definitions)
 
-    if definitions:
-        return core_schema.definitions_schema(schema=schema, definitions=definitions)
-    return schema
+
+def flatten_schema_defs(schema: core_schema.CoreSchema) -> core_schema.CoreSchema:
+    """
+    Simplify schema references by:
+      1. Grouping all definitions into a single top-level `definitions` schema, similar to a JSON schema's `#/$defs`.
+    """
+    return _simplify_schema_references(schema, inline=False)
+
+
+def inline_schema_defs(schema: core_schema.CoreSchema) -> core_schema.CoreSchema:
+    """
+    Simplify schema references by:
+      1. Inlining any definitions that are only referenced in one place and are not involved in a cycle.
+      2. Removing any unused `ref` references from schemas.
+    """
+    return _simplify_schema_references(schema, inline=True)
