@@ -3,7 +3,7 @@ from __future__ import annotations as _annotations
 from dataclasses import dataclass, replace
 from typing import Any, Union
 
-from pydantic_core import core_schema
+from pydantic_core import core_schema, Some
 from typing_extensions import Literal, TypedDict
 
 from ._typing_extra import TypeVarType
@@ -25,6 +25,7 @@ DeferredAction = Union[DeferredClassGetitem, DeferredReplaceTypes]
 @dataclass
 class PydanticRecursiveRef:
     type_ref: str
+    resolved: Some[Any] | None = None
 
     __name__ = 'PydanticRecursiveRef'
     __hash__ = object.__hash__

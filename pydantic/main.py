@@ -756,6 +756,8 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
                     # TODO: Make sure validation fails if there are still undefined types, perhaps using MockValidator
                     pass
 
+                _generics.set_generic_recursion_self_type(origin, args, submodel)
+
                 submodel = _generics.create_generic_submodel(model_name, origin, args, params)
 
                 # Update cache
@@ -1099,26 +1101,28 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
 RootModelRootType = typing.TypeVar('RootModelRootType')
 
 
-class RootModel(BaseModel, typing.Generic[RootModelRootType]):
-    __pydantic_root_model__ = True
-    __pydantic_extra__ = None
+class RootModel: pass
 
-    root: RootModelRootType
+# class RootModel(BaseModel, typing.Generic[RootModelRootType]):
+#     __pydantic_root_model__ = True
+#     __pydantic_extra__ = None
 
-    def __init__(__pydantic_self__, root: RootModelRootType) -> None:  # type: ignore
-        __tracebackhide__ = True
-        # this is required set setattr works on RootModels, should be moved to rust
-        _object_setattr(__pydantic_self__, '__pydantic_fields_set__', {'root'})
-        __pydantic_self__.__pydantic_validator__.validate_python(root, self_instance=__pydantic_self__)
+#     root: RootModelRootType
 
-    __init__.__pydantic_base_init__ = True  # type: ignore
+#     def __init__(__pydantic_self__, root: RootModelRootType) -> None:  # type: ignore
+#         __tracebackhide__ = True
+#         # this is required set setattr works on RootModels, should be moved to rust
+#         _object_setattr(__pydantic_self__, '__pydantic_fields_set__', {'root'})
+#         __pydantic_self__.__pydantic_validator__.validate_python(root, self_instance=__pydantic_self__)
 
-    @classmethod
-    def model_construct(cls: type[Model], root: RootModelRootType, _fields_set: set[str] | None = None) -> Model:
-        return super().model_construct(root=root, _fields_set=_fields_set)
+#     __init__.__pydantic_base_init__ = True  # type: ignore
 
-    def __repr_args__(self) -> _repr.ReprArgs:
-        yield 'root', self.root
+#     @classmethod
+#     def model_construct(cls: type[Model], root: RootModelRootType, _fields_set: set[str] | None = None) -> Model:
+#         return super().model_construct(root=root, _fields_set=_fields_set)
+
+#     def __repr_args__(self) -> _repr.ReprArgs:
+#         yield 'root', self.root
 
 
 @typing.overload

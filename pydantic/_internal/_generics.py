@@ -333,13 +333,13 @@ def check_parameters_count(cls: type[BaseModel], parameters: tuple[Any, ...]) ->
         raise TypeError(f'Too {description} parameters for {cls}; actual {actual}, expected {expected}')
 
 
-_generic_recursion_cache: ContextVar[set[str] | None] = ContextVar('_generic_recursion_cache', default=None)
+_generic_recursion_cache: ContextVar[dict[str, PydanticRecursiveRef] | None] = ContextVar('_generic_recursion_cache', default=None)
 
 
 @contextmanager
 def generic_recursion_self_type(
     origin: type[BaseModel], args: tuple[Any, ...]
-) -> Iterator[PydanticForwardRef | PydanticRecursiveRef | None]:
+) -> Iterator[PydanticRecursiveRef | None]:
     """
     This contextmanager should be placed around the recursive calls used to build a generic type,
     and accept as arguments the generic origin type and the type arguments being passed to it.
@@ -348,9 +348,9 @@ def generic_recursion_self_type(
     can be used while building the core schema, and will produce a schema_ref that will be valid in the
     final parent schema.
     """
-    previously_seen_type_refs = _generic_recursion_cache.get()
+    previously_seen_type_refs: dict[str, PydanticRecursiveRef] | None = _generic_recursion_cache.get()
     if previously_seen_type_refs is None:
-        previously_seen_type_refs = set()
+        previously_seen_type_refs = {}
         token = _generic_recursion_cache.set(previously_seen_type_refs)
     else:
         token = None
@@ -358,11 +358,27 @@ def generic_recursion_self_type(
     try:
         type_ref = get_type_ref(origin, args_override=args)
         if type_ref in previously_seen_type_refs:
-            self_type = PydanticRecursiveRef(type_ref=type_ref)
-            yield self_type
+            yield previously_seen_type_refs[type_ref]
         else:
-            previously_seen_type_refs.add(type_ref)
+            previously_seen_type_refs[type_ref] = PydanticRecursiveRef(type_ref=type_ref)
             yield None
+    finally:
+        if token:
+            _generic_recursion_cache.reset(token)
+
+
+def set_generic_recursion_self_type(origin: type[BaseModel], args: tuple[Any, ...], resolved: Any) -> None:
+    previously_seen_type_refs: dict[str, PydanticRecursiveRef] | None = _generic_recursion_cache.get()
+    if previously_seen_type_refs is None:
+        previously_seen_type_refs = {}
+        token = _generic_recursion_cache.set(previously_seen_type_refs)
+    else:
+        token = None
+
+    try:
+        type_ref = get_type_ref(origin, args_override=args)
+        if type_ref in previously_seen_type_refs:
+            previously_seen_type_refs[type_ref].resolved = resolved
     finally:
         if token:
             _generic_recursion_cache.reset(token)
@@ -373,7 +389,7 @@ def recursively_defined_type_refs() -> set[str]:
     if not visited:
         return set()  # not in a generic recursion, so there are no types
 
-    return visited.copy()  # don't allow modifications
+    return set(visited.keys())  # don't allow modifications
 
 
 def get_cached_generic_type_early(parent: type[BaseModel], typevar_values: Any) -> type[BaseModel] | None:
