@@ -340,6 +340,10 @@ class GenerateSchema:
 
     def _generate_schema(self, obj: Any) -> core_schema.CoreSchema:  # noqa: C901
         """Recursively generate a pydantic-core schema for any supported python type."""
+        maybe_annotations = self._get_prepare_pydantic_annotations_for_known_type(obj, ())
+        if maybe_annotations:
+            source_type, annotations = maybe_annotations
+            return self._apply_annotations(lambda x: x, source_type, annotations)
         if isinstance(obj, dict):
             # we assume this is already a valid schema
             return obj  # type: ignore[return-value]
@@ -1131,11 +1135,7 @@ class GenerateSchema:
             if isinstance(obj, type(Annotated[int, 123])):
                 schema = transform_inner_schema(self._annotated_schema(obj))
             else:
-                from_property = self._generate_schema_from_property(obj, obj)
-                if from_property is None:
-                    schema = self._generate_schema(obj)
-                else:
-                    schema = from_property
+                schema = self._generate_schema_for_type(obj)
                 metadata_js_function = _extract_get_pydantic_json_schema(obj, schema)
                 if metadata_js_function is not None:
                     pydantic_js_functions.append(metadata_js_function)

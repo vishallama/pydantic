@@ -2,122 +2,245 @@
 
 You can also define your own custom data types. There are several ways to achieve it.
 
-### Classes with `____get_pydantic_core_schema____`
+### Classes with `___get_pydantic_core_schema___`
 
+Custom types (used as `field_name: TheType` or `field_name: Annotated[TheType, ...]`) as well as Annotated metadata (used as `field_name: Annotated[int, SomeMetadata]`)
+can modify or override the generated schema by implementing `__get_pydantic_core_schema__`.
+This method receives two positional arguments:
+
+1. The type annotation that corresponds to this type (so in the case of `TheType[T][int]` it would be `TheType[int]`).
+2. A handler / callback to call the next implementer of `__get_pydantic_core_schema__`.
+
+The handler system works just like `mode='wrap'` validators. In this case the input is the type and the output is a `CoreSchema`.
+
+Here is an example of a custom type that *overrides* the generated core schema:
 
 ```py
-import re
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Dict, List, Type
 
-from pydantic_core import PydanticCustomError, core_schema
-from typing_extensions import Annotated
+from pydantic_core import core_schema
 
-from pydantic import (
-    BaseModel,
-    GetCoreSchemaHandler,
-    GetJsonSchemaHandler,
-    ValidationError,
-)
-from pydantic.json_schema import JsonSchemaValue
-
-# https://en.wikipedia.org/wiki/Postcodes_in_the_United_Kingdom#Validation
-post_code_regex = re.compile(
-    r'(?:'
-    r'([A-Z]{1,2}[0-9][A-Z0-9]?|ASCN|STHL|TDCU|BBND|[BFS]IQQ|PCRN|TKCA) ?'
-    r'([0-9][A-Z]{2})|'
-    r'(BFPO) ?([0-9]{1,4})|'
-    r'(KY[0-9]|MSR|VG|AI)[ -]?[0-9]{4}|'
-    r'([A-Z]{2}) ?([0-9]{2})|'
-    r'(GE) ?(CX)|'
-    r'(GIR) ?(0A{2})|'
-    r'(SAN) ?(TA1)'
-    r')'
-)
+from pydantic import BaseModel, GetCoreSchemaHandler
 
 
-class PostCodeAnnotation:
-    """
-    Partial UK postcode validation. Note: this is just an example, and is not
-    intended for use in production; in particular this does NOT guarantee
-    a postcode exists, just that it has a valid format.
-    """
+@dataclass
+class CompressedString:
+    dictionary: Dict[int, str]
+    text: List[int]
+
+    def build(self) -> Iterable[str]:
+      for key in self.text:
+          yield self.dictionary[key]
 
     @classmethod
     def __get_pydantic_core_schema__(
-        cls, _source_type: Any, _handler: GetCoreSchemaHandler
+        cls, source: Type[Any], handler: GetCoreSchemaHandler
     ) -> core_schema.CoreSchema:
+        assert source is CompressedString
         return core_schema.no_info_after_validator_function(
-            cls.validate,
+            cls._validate,
             core_schema.str_schema(),
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                cls._serialize, info_arg=False, return_schema=core_schema.str_schema()
+            ),
         )
 
-    @classmethod
-    def __get_pydantic_json_schema__(
-        cls, schema: core_schema.CoreSchema, handler: GetJsonSchemaHandler
-    ) -> JsonSchemaValue:
-        json_schema = handler(schema)
-        json_schema.update(
-            # simplified regex here for brevity, see the wikipedia link above
-            pattern='^[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}$',
-            # some example postcodes
-            examples=['SP11 9DG', 'W1J 7BU'],
-        )
-        return json_schema
+    @staticmethod
+    def _validate(value: str) -> 'CompressedString':
+        inverse_dictionary: Dict[str, int] = {}
+        text: List[int] = []
+        for word in value.split(' '):
+            if word not in inverse_dictionary:
+                inverse_dictionary[word] = len(inverse_dictionary)
+            text.append(inverse_dictionary[word])
+        return CompressedString({v: k for k, v in inverse_dictionary.items()}, text)
 
-    @classmethod
-    def validate(cls, v: str):
-        m = post_code_regex.fullmatch(v.upper())
-        if m:
-            return f'{m.group(1)} {m.group(2)}'
-        else:
-            raise PydanticCustomError('postcode', 'invalid postcode format')
+    @staticmethod
+    def _serialize(value: 'CompressedString') -> str:
+        return value.build()
 
 
-class Model(BaseModel):
-    post_code: Annotated[str, PostCodeAnnotation]
+class MyModel(BaseModel):
+    value: CompressedString
 
 
-model = Model(post_code='sw8 5el')
-print(model)
-#> post_code='SW8 5EL'
-print(model.post_code)
-#> SW8 5EL
-print(Model.model_json_schema())
+print(MyModel.model_json_schema())
 """
 {
-    'properties': {
-        'post_code': {
-            'examples': ['SP11 9DG', 'W1J 7BU'],
-            'pattern': '^[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}$',
-            'title': 'Post Code',
-            'type': 'string',
-        }
-    },
-    'required': ['post_code'],
-    'title': 'Model',
+    'properties': {'value': {'title': 'Value', 'type': 'string'}},
+    'required': ['value'],
+    'title': 'MyModel',
     'type': 'object',
 }
 """
+print(MyModel(value='fox fox fox dog fox'))
+#> value=CompressedString(dictionary={0: 'fox', 1: 'dog'}, text=[0, 0, 0, 1, 0])
+
+print(MyModel(value='fox fox fox dog fox').model_dump(mode='json'))
+#> {'value': 'fox fox fox dog fox'}
+```
+
+Since Pydantic would not know how to generate a schema for `CompressedString` if you call `handler(source)` in it's `__get_pydantic_core_schema__` method you would get a `pydantic.errors.PydanticSchemaGenerationError` error.
+This will be the case for most custom types so you almost never want to call into `handler` for custom types.
+You could however call `handler(str)` which would give you the `CoreSchema` for a plain string.
+
+The process for Annotated metadata is much the same except that you can generally call into `handler` to have Pydantic handle generating the schema.
+
+```py
+from dataclasses import dataclass
+from typing import Any, Sequence, Type
+
+from pydantic_core import core_schema
+from typing_extensions import Annotated
+
+from pydantic import BaseModel, GetCoreSchemaHandler, ValidationError
+
+
+@dataclass
+class RestrictCharacters:
+    alphabet: Sequence[str]
+
+    def __get_pydantic_core_schema__(
+        self, source: Type[Any], handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        if not self.alphabet:
+            raise ValueError('Alphabet may not be empty')
+        schema = handler(source)  # get the CoreSchema from the type / inner constraints
+        if schema['type'] != 'str':
+            raise TypeError('RestrictCharacters can only be applied to strings')
+        return core_schema.no_info_after_validator_function(
+            self.validate,
+            schema,
+        )
+
+    def validate(self, value: str) -> str:
+        if any(c not in self.alphabet for c in value):
+            raise ValueError(f'{value!r} is not restricted to {self.alphabet!r}')
+        return value
+
+
+class MyModel(BaseModel):
+    value: Annotated[str, RestrictCharacters('ABC')]
+
+
+print(MyModel.model_json_schema())
+"""
+{
+    'properties': {'value': {'title': 'Value', 'type': 'string'}},
+    'required': ['value'],
+    'title': 'MyModel',
+    'type': 'object',
+}
+"""
+print(MyModel(value='CBA'))
+#> value='CBA'
+
 try:
-    Model(post_code='invalid')
+    MyModel(value='XYZ')
 except ValidationError as e:
-    print(e.errors())
+    print(e)
     """
-    [
-        {
-            'type': 'postcode',
-            'loc': ('post_code',),
-            'msg': 'invalid postcode format',
-            'input': 'invalid',
-        }
-    ]
+    1 validation error for MyModel
+    value
+      Value error, 'XYZ' is not restricted to 'ABC' [type=value_error, input_value='XYZ', input_type=str]
     """
 ```
 
-Similar validation could be achieved using [`constr(regex=...)`](#constrained-types) except the value won't be
-formatted with a space, the schema would just include the full pattern and the returned value would be a vanilla string.
+So far we have been wrapping the schema, but if you just want to *modify* it or *ignore* it you can as well.
+To modify the schema first call the handler and then mutate the result:
 
-See [schema](../json_schema.md) for more details on how the model's schema is generated.
+```py
+from typing import Any, Type
+
+from pydantic_core import ValidationError, core_schema
+from typing_extensions import Annotated
+
+from pydantic import BaseModel, GetCoreSchemaHandler
+
+
+class SmallString:
+    def __get_pydantic_core_schema__(
+        self,
+        source: Type[Any],
+        handler: GetCoreSchemaHandler,
+    ) -> core_schema.CoreSchema:
+        schema = handler(source)
+        assert schema['type'] == 'str'
+        schema['max_length'] = 10  # modify in place
+        return schema
+
+
+class MyModel(BaseModel):
+    value: Annotated[str, SmallString()]
+
+
+try:
+    MyModel(value='too long!!!!!')
+except ValidationError as e:
+    print(e)
+    """
+    1 validation error for MyModel
+    value
+      String should have at most 10 characters [type=string_too_long, input_value='too long!!!!!', input_type=str]
+    """
+```
+
+To override the schema completely do not call the handler and return your own `CoreSchema`:
+
+```py
+from typing import Any, Type
+
+from pydantic_core import ValidationError, core_schema
+from typing_extensions import Annotated
+
+from pydantic import BaseModel, GetCoreSchemaHandler
+
+
+class AllowAnySubclass:
+    def __get_pydantic_core_schema__(
+        self, source: Type[Any], handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        # we can't call handler since it will fail for arbitrary types
+        def validate(value: Any) -> Any:
+            if not isinstance(value, source):
+                raise ValueError(
+                    f'Expected an instance of {source}, got an instance of {type(value)}'
+                )
+
+        return core_schema.no_info_plain_validator_function(validate)
+
+
+class Foo:
+    pass
+
+
+class Model(BaseModel):
+    f: Annotated[Foo, AllowAnySubclass()]
+
+
+print(Model(f=Foo()))
+#> f=None
+
+
+class NotFoo:
+    pass
+
+
+try:
+    Model(f=NotFoo())
+except ValidationError as e:
+    print(e)
+    """
+    1 validation error for Model
+    f
+      Value error, Expected an instance of <class '__main__.Foo'>, got an instance of <class '__main__.NotFoo'> [type=value_error, input_value=<__main__.NotFoo object at 0x0123456789ab>, input_type=NotFoo]
+    """
+```
+
+#### Generating an inner schema for unrelated types
+
+
 
 ### Arbitrary Types Allowed
 

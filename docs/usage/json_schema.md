@@ -395,8 +395,9 @@ class CompressedString:
     dictionary: Dict[int, str]
     text: List[int]
 
-    def build(self) -> str:
-        return ' '.join([self.dictionary[key] for key in self.text])
+    def build(self) -> Iterable[str]:
+      for key in self.text:
+          yield self.dictionary[key]
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -446,7 +447,9 @@ print(MyModel(value='fox fox fox dog fox').model_dump(mode='json'))
 #> {'value': 'fox fox fox dog fox'}
 ```
 
-Since Pydantic would not know how to generate a schema for `CompressedString` if you call `handler(source)` in it's `__get_pydantic_core_schema__` method you would get a `pydantic.errors.PydanticSchemaGenerationError` error. This will be the case for most custom types so you almost never want to call into `handler` for custom types.
+Since Pydantic would not know how to generate a schema for `CompressedString` if you call `handler(source)` in it's `__get_pydantic_core_schema__` method you would get a `pydantic.errors.PydanticSchemaGenerationError` error.
+This will be the case for most custom types so you almost never want to call into `handler` for custom types.
+You could however call `handler(str)` which would give you the `CoreSchema` for a plain string.
 
 The process for Annotated metadata is much the same except that you can generally call into `handler` to have Pydantic handle generating the schema.
 

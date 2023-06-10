@@ -2280,7 +2280,7 @@ def test_path_modify_schema():
     class MyPath(Path):
         @classmethod
         def __get_pydantic_core_schema__(cls, _source_type: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
-            return handler.generate_schema(Path)
+            return handler(Path)
 
         @classmethod
         def __get_pydantic_json_schema__(
@@ -2501,7 +2501,7 @@ def test_schema_for_generic_field():
         ) -> core_schema.PlainValidatorFunctionSchema:
             source_args = getattr(source, '__args__', [Any])
             param = source_args[0]
-            metadata = build_metadata_dict(js_functions=[lambda _c, h: h(handler.generate_schema(param))])
+            metadata = build_metadata_dict(js_functions=[lambda _c, h: h(handler(param))])
             return core_schema.general_plain_validator_function(
                 GenModel,
                 metadata=metadata,
@@ -2540,6 +2540,14 @@ def test_schema_for_generic_field():
         data1: GenModelModified
 
         model_config = dict(arbitrary_types_allowed=True)
+    
+    # insert_assert(ModelModified.model_json_schema())
+    assert ModelModified.model_json_schema() == {
+        'properties': {'data': {'title': 'Data', 'type': 'string'}, 'data1': {'title': 'Data1'}},
+        'required': ['data', 'data1'],
+        'title': 'ModelModified',
+        'type': 'object',
+    }
 
     assert ModelModified.model_json_schema() == {
         'title': 'ModelModified',
@@ -2632,7 +2640,7 @@ def test_advanced_generic_schema():  # noqa: C901
 
                 def js_func(s, h):
                     # ignore the schema we were given and get a new CoreSchema
-                    s = handler.generate_schema(Optional[arg])
+                    s = handler(Optional[arg])
                     return h(s)
 
                 return core_schema.general_plain_validator_function(
