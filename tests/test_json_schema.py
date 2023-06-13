@@ -4518,3 +4518,19 @@ def test_json_schema_extras_on_ref() -> None:
         'examples': b'{"foo":{"name":"John","age":28}}',
         'title': 'ModelTitle',
     }
+
+
+@pytest.mark.parametrize(
+    'extra,additional_properties', [('allow', {}), ('ignore', None), ('forbid', False), (None, None)]
+)
+def test_extra(extra, additional_properties):
+    class A(BaseModel):
+        if extra is not None:
+            model_config = dict(extra=extra)
+        data: str
+
+    json_schema = A.model_json_schema()
+    if additional_properties is None:
+        assert 'additionalProperties' not in json_schema
+    else:
+        assert json_schema['additionalProperties'] == additional_properties

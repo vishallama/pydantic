@@ -9,7 +9,7 @@ from typing_extensions import Literal, Protocol, TypedDict
 from ._migration import getattr_migration
 from .deprecated.config import BaseConfig
 
-__all__ = 'BaseConfig', 'ConfigDict', 'Extra'
+__all__ = 'BaseConfig', 'ConfigDict', 'Extra', 'ExtraValues'
 
 
 class JsonSchemaExtraCallable(Protocol):

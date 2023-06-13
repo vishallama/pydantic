@@ -29,7 +29,7 @@ from pydantic_core.core_schema import ComputedField
 from typing_extensions import Literal, assert_never
 
 from ._internal import _core_metadata, _core_utils, _schema_generation_shared, _typing_extra
-from .config import JsonSchemaExtraCallable
+from .config import ExtraValues, JsonSchemaExtraCallable
 from .errors import PydanticInvalidForJsonSchema, PydanticUserError
 
 if TYPE_CHECKING:
@@ -962,11 +962,9 @@ class GenerateJsonSchema:
         cls = cast('type[BaseModel]', schema['cls'])
         config = cls.model_config
         title = config.get('title')
-        forbid_additional_properties = config.get('extra') == 'forbid'
+        extra = config.get('extra')
         json_schema_extra = config.get('json_schema_extra')
-        json_schema = self._update_class_schema(
-            json_schema, title, forbid_additional_properties, cls, json_schema_extra
-        )
+        json_schema = self._update_class_schema(json_schema, title, extra, cls, json_schema_extra)
 
         return json_schema
 
@@ -974,7 +972,7 @@ class GenerateJsonSchema:
         self,
         json_schema: JsonSchemaValue,
         title: str | None,
-        forbid_additional_properties: bool,
+        extra: ExtraValues | None,
         cls: type[Any],
         json_schema_extra: dict[str, Any] | JsonSchemaExtraCallable | None,
     ) -> JsonSchemaValue:
@@ -987,8 +985,10 @@ class GenerateJsonSchema:
             # referenced_schema['title'] = title
             schema_to_update.setdefault('title', title)
 
-        if forbid_additional_properties:
+        if extra == 'forbid':
             schema_to_update['additionalProperties'] = False
+        elif extra == 'allow':
+            schema_to_update['additionalProperties'] = {}  # "any" schema
 
         if isinstance(json_schema_extra, (staticmethod, classmethod)):
             # In older versions of python, this is necessary to ensure staticmethod/classmethods are callable
@@ -1062,11 +1062,9 @@ class GenerateJsonSchema:
         config: ConfigDict = getattr(cls, '__pydantic_config__', cast('ConfigDict', {}))
 
         title = config.get('title') or cls.__name__
-        forbid_additional_properties = config.get('extra') == 'forbid'
+        extra = config.get('extra')
         json_schema_extra = config.get('json_schema_extra')
-        json_schema = self._update_class_schema(
-            json_schema, title, forbid_additional_properties, cls, json_schema_extra
-        )
+        json_schema = self._update_class_schema(json_schema, title, extra, cls, json_schema_extra)
 
         # Dataclass-specific handling of description
         if is_dataclass(cls) and not hasattr(cls, '__pydantic_validator__'):
