@@ -220,6 +220,7 @@ V2_REMOVED_KEYS = {
     'json_encoders',
     'copy_on_model_validation',
     'post_init_call',
+    'schema_extra'
 }
 V2_RENAMED_KEYS = {
     'allow_population_by_field_name': 'populate_by_name',
@@ -230,7 +231,6 @@ V2_RENAMED_KEYS = {
     'max_anystr_length': 'str_max_length',
     'min_anystr_length': 'str_min_length',
     'orm_mode': 'from_attributes',
-    'schema_extra': 'json_schema_extra',
     'validate_all': 'validate_default',
 }
 
