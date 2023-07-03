@@ -1190,6 +1190,9 @@ def test_replace_types_with_user_defined_generic_type_field():
     class CustomTuple(Tuple[T]):
         pass
 
+    class CustomVariableTuple(Tuple[T, ...]):
+        pass
+
     class Model(BaseModel, Generic[T, KT, VT]):
         counter_field: CustomCounter[T]
         default_dict_field: CustomDefaultDict[KT, VT]
@@ -1202,6 +1205,7 @@ def test_replace_types_with_user_defined_generic_type_field():
         ordered_dict_field: CustomOrderedDict[KT, VT]
         set_field: CustomSet[T]
         tuple_field: CustomTuple[T]
+        variable_tuple_field: CustomVariableTuple[T]
 
     assert replace_types(Model, {T: bool, KT: str, VT: int}) == Model[bool, str, int]
     assert replace_types(Model[T, KT, VT], {T: bool, KT: str, VT: int}) == Model[bool, str, int]
@@ -1219,6 +1223,7 @@ def test_replace_types_with_user_defined_generic_type_field():
         ordered_dict_field=OrderedDict([('a', 1)]),
         set_field={True, False},
         tuple_field=(True,),
+        variable_tuple_field=(True, False),
     )
 
     # The following assertions are just to document the current behavior, and should
@@ -1234,6 +1239,7 @@ def test_replace_types_with_user_defined_generic_type_field():
     assert type(m.ordered_dict_field) is CustomOrderedDict
     assert type(m.set_field) is CustomSet
     assert type(m.tuple_field) is tuple
+    assert type(m.variable_tuple_field) is tuple
 
     assert m.model_dump() == {
         'counter_field': {False: 1, True: 1},
@@ -1247,6 +1253,7 @@ def test_replace_types_with_user_defined_generic_type_field():
         'ordered_dict_field': {'a': 1},
         'set_field': {False, True},
         'tuple_field': (True,),
+        'variable_tuple_field': (True, False),
     }
 
 
