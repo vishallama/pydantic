@@ -437,17 +437,16 @@ def complete_model_class(
         set_basemodel_mock_validator(cls, cls_name, f'`{e.name}`')
         return False
 
-    core_config = config_wrapper.core_config(cls)
-
     schema = gen_schema.collect_definitions(schema)
-    schema = apply_discriminators(flatten_schema_defs(schema))
+    schema = flatten_schema_defs(schema)
     if collect_invalid_schemas(schema):
         set_basemodel_mock_validator(cls, cls_name, 'all referenced types')
         return False
 
     # debug(schema)
-    cls.__pydantic_core_schema__ = schema
+    cls.__pydantic_core_schema__ = schema = apply_discriminators(schema)
     simplified_core_schema = inline_schema_defs(schema)
+    core_config = config_wrapper.core_config(cls)
     cls.__pydantic_validator__ = SchemaValidator(simplified_core_schema, core_config)
     cls.__pydantic_serializer__ = SchemaSerializer(simplified_core_schema, core_config)
     cls.__pydantic_complete__ = True

@@ -3,6 +3,7 @@ from __future__ import annotations as _annotations
 
 import sys
 from dataclasses import is_dataclass
+from functools import cached_property
 from typing import TYPE_CHECKING, Any, Dict, Generic, Iterable, Set, TypeVar, Union, overload
 
 from pydantic_core import CoreSchema, SchemaSerializer, SchemaValidator, Some
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
     IncEx = Union[Set[int], Set[str], Dict[int, Any], Dict[str, Any]]
 
 
-def _get_schema(type_: Any, config_wrapper: _config.ConfigWrapper, parent_depth: int) -> CoreSchema:
+def _get_schema(type_: Any, config_wrapper: _config.ConfigWrapper, types_namespace: dict[str, Any]) -> CoreSchema:
     """`BaseModel` uses its own `__module__` to find out where it was defined
     and then look for symbols to resolve forward references in those globals.
     On the other hand this function can be called with arbitrary objects,
@@ -73,10 +74,7 @@ def _get_schema(type_: Any, config_wrapper: _config.ConfigWrapper, parent_depth:
 
     But at the very least this behavior is _subtly_ different from `BaseModel`'s.
     """
-    local_ns = _typing_extra.parent_frame_namespace(parent_depth=parent_depth)
-    global_ns = sys._getframe(max(parent_depth - 1, 1)).f_globals.copy()
-    global_ns.update(local_ns or {})
-    gen = _generate_schema.GenerateSchema(config_wrapper, types_namespace=global_ns, typevars_map={})
+    gen = _generate_schema.GenerateSchema(config_wrapper, types_namespace=types_namespace, typevars_map={})
     schema = gen.generate_schema(type_)
     schema = gen.collect_definitions(schema)
     return schema
@@ -129,22 +127,22 @@ class TypeAdapter(Generic[T]):
             raise NotImplementedError
 
         @overload
-        def __init__(self, type: type[T], *, config: ConfigDict | None = None, _parent_depth: int = 2) -> None:
+        def __init__(self, tp: type[T], *, config: ConfigDict | None = None, _parent_depth: int = 2) -> None:
             ...
 
         # this overload is for non-type things like Union[int, str]
         # Pyright currently handles this "correctly", but MyPy understands this as TypeAdapter[object]
         # so an explicit type cast is needed
         @overload
-        def __init__(self, type: T, *, config: ConfigDict | None = None, _parent_depth: int = 2) -> None:
+        def __init__(self, tp: T, *, config: ConfigDict | None = None, _parent_depth: int = 2) -> None:
             ...
 
-    def __init__(self, type: Any, *, config: ConfigDict | None = None, _parent_depth: int = 2) -> None:
+    def __init__(
+        self, tp: Any, *, config: ConfigDict | None = None, _parent_depth: int = 2, _eager: bool = False
+    ) -> None:
         """Initializes the TypeAdapter object."""
-        config_wrapper = _config.ConfigWrapper(config)
-
         try:
-            type_has_config = issubclass(type, BaseModel) or is_dataclass(type) or is_typeddict(type)
+            type_has_config = issubclass(tp, BaseModel) or is_dataclass(tp) or is_typeddict(tp)
         except TypeError:
             # type is not a class
             type_has_config = False
@@ -158,31 +156,49 @@ class TypeAdapter(Generic[T]):
                 code='type-adapter-config-unused',
             )
 
-        core_schema: CoreSchema
-        try:
-            core_schema = _getattr_no_parents(type, '__pydantic_core_schema__')
-        except AttributeError:
-            core_schema = _get_schema(type, config_wrapper, parent_depth=_parent_depth + 1)
+        self._tp = tp
+        self._config_wrapper = _config.ConfigWrapper(config)
+        self._core_config = self._config_wrapper.core_config(None)
 
+        local_ns = _typing_extra.parent_frame_namespace(parent_depth=_parent_depth)
+        global_ns = sys._getframe(max(_parent_depth - 1, 1)).f_globals.copy()
+        global_ns.update(local_ns or {})
+        self._types_namespace = global_ns
+
+        # TODO: remove the _eager flag; right now it's included for easier testing
+        if _eager:
+            assert self.validator
+            assert self.serializer
+
+    @cached_property
+    def core_schema(self) -> CoreSchema:
+        """Builds the core_schema"""
+        try:
+            core_schema = _getattr_no_parents(self._tp, '__pydantic_core_schema__')
+        except AttributeError:
+            core_schema = _get_schema(self._tp, self._config_wrapper, types_namespace=self._types_namespace)
         core_schema = _discriminated_union.apply_discriminators(_core_utils.flatten_schema_defs(core_schema))
-        simplified_core_schema = _core_utils.inline_schema_defs(core_schema)
+        return core_schema
 
-        core_config = config_wrapper.core_config(None)
-        validator: SchemaValidator
+    @cached_property
+    def _simplified_core_schema(self):
+        return _core_utils.inline_schema_defs(self.core_schema)
+
+    @cached_property
+    def validator(self) -> SchemaValidator:
+        """Builds the validator"""
         try:
-            validator = _getattr_no_parents(type, '__pydantic_validator__')
+            return _getattr_no_parents(self._tp, '__pydantic_validator__')
         except AttributeError:
-            validator = SchemaValidator(simplified_core_schema, core_config)
+            return SchemaValidator(self._simplified_core_schema, self._core_config)
 
-        serializer: SchemaSerializer
+    @cached_property
+    def serializer(self) -> SchemaSerializer:
+        """Builds the serializer"""
         try:
-            serializer = _getattr_no_parents(type, '__pydantic_serializer__')
+            return _getattr_no_parents(self._tp, '__pydantic_serializer__')
         except AttributeError:
-            serializer = SchemaSerializer(simplified_core_schema, core_config)
-
-        self.core_schema = core_schema
-        self.validator = validator
-        self.serializer = serializer
+            return SchemaSerializer(self._simplified_core_schema, self._core_config)
 
     def validate_python(
         self,

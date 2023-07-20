@@ -2706,11 +2706,10 @@ def test_arbitrary_types_not_a_type() -> None:
     class Bar:
         pass
 
+    bar = Bar()
     with pytest.warns(UserWarning, match='is not a Python type'):
         ta = TypeAdapter(Foo(), config=ConfigDict(arbitrary_types_allowed=True))
-
-    bar = Bar()
-    assert ta.validate_python(bar) is bar
+        assert ta.validate_python(bar) is bar
 
 
 def test_deferred_core_schema() -> None:
