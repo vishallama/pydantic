@@ -447,7 +447,11 @@ def complete_model_class(
 
     # debug(schema)
     cls.__pydantic_core_schema__ = schema
-    simplified_core_schema = inline_schema_defs(schema)
+    metadata = schema.setdefault('metadata', {})
+    simplified_core_schema = metadata.get('inlined', None)
+    if not simplified_core_schema:
+        simplified_core_schema = inline_schema_defs(schema)
+        metadata['inlined'] = simplified_core_schema
     cls.__pydantic_validator__ = SchemaValidator(simplified_core_schema, core_config)
     cls.__pydantic_serializer__ = SchemaSerializer(simplified_core_schema, core_config)
     cls.__pydantic_complete__ = True

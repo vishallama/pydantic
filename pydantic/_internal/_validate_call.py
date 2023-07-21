@@ -63,8 +63,12 @@ class ValidateCallWrapper:
         gen_schema = _generate_schema.GenerateSchema(config_wrapper, namespace)
         self.__pydantic_core_schema__ = schema = gen_schema.collect_definitions(gen_schema.generate_schema(function))
         core_config = config_wrapper.core_config(self)
-        schema = _discriminated_union.apply_discriminators(flatten_schema_defs(schema))
-        simplified_schema = inline_schema_defs(schema)
+        metadata = schema.setdefault('metadata', {})
+        simplified_schema = metadata.get('inlined', None)
+        if not simplified_schema:
+            schema = _discriminated_union.apply_discriminators(flatten_schema_defs(schema))
+            simplified_schema = inline_schema_defs(schema)
+            metadata['inlined'] = simplified_schema
         self.__pydantic_validator__ = pydantic_core.SchemaValidator(simplified_schema, core_config)
 
         if self._validate_return:
@@ -78,8 +82,13 @@ class ValidateCallWrapper:
                 gen_schema.generate_schema(return_type)
             )
             core_config = config_wrapper.core_config(self)
-            schema = _discriminated_union.apply_discriminators(flatten_schema_defs(schema))
-            simplified_schema = inline_schema_defs(schema)
+            metadata = schema.setdefault('metadata', {})
+            simplified_schema = metadata.get('inlined', None)
+            if not simplified_schema:
+                schema = _discriminated_union.apply_discriminators(flatten_schema_defs(schema))
+                simplified_schema = inline_schema_defs(schema)
+                metadata['inlined'] = simplified_schema
+            self.__return_pydantic_core_schema__.get('metadata', {})['inlined'] = simplified_schema
             self.__return_pydantic_validator__ = pydantic_core.SchemaValidator(simplified_schema, core_config)
         else:
             self.__return_pydantic_core_schema__ = None

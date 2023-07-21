@@ -159,9 +159,13 @@ def complete_dataclass(
     # We are about to set all the remaining required properties expected for this cast;
     # __pydantic_decorators__ and __pydantic_fields__ should already be set
     cls = typing.cast('type[PydanticDataclass]', cls)
-    # debug(schema)
+    metadata = schema.setdefault('metadata', {})
     cls.__pydantic_core_schema__ = schema = _discriminated_union.apply_discriminators(flatten_schema_defs(schema))
-    simplified_core_schema = inline_schema_defs(schema)
+    simplified_core_schema = metadata.get('inlined', None)
+    if not simplified_core_schema:
+        simplified_core_schema = inline_schema_defs(schema)
+    else:
+        metadata['inlined'] = simplified_core_schema
     cls.__pydantic_validator__ = validator = SchemaValidator(simplified_core_schema, core_config)
     cls.__pydantic_serializer__ = SchemaSerializer(simplified_core_schema, core_config)
 
