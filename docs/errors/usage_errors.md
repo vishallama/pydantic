@@ -882,7 +882,7 @@ except PydanticUserError as exc_info:
     assert exc_info.code == 'multiple-field-serializers'
 ```
 
-## Invalid annotated type {#invalid_annotated_type}
+## Invalid annotated type {#invalid-annotated-type}
 
 This error is raised when an annotation cannot annotate a type.
 
@@ -897,10 +897,10 @@ try:
         foo: Annotated[str, FutureDate()]
 
 except PydanticUserError as exc_info:
-    assert exc_info.code == 'invalid_annotated_type'
+    assert exc_info.code == 'invalid-annotated-type'
 ```
 
-## `config` is unused with TypeAdapter {#type-adapter-config-unused}
+## `config` is unused with `TypeAdapter` {#type-adapter-config-unused}
 
 You will get this error if you try to pass `config` to `TypeAdapter` when the type is a type that
 has it's own config that cannot be overridden (currently this is only `BaseModel`, `TypedDict` and `dataclass`):
@@ -938,5 +938,23 @@ class MyTypedDict(TypedDict):
 
 TypeAdapter(MyTypedDict)  # ok
 ```
+
+## Cannot specify `model_config['extra']` with `RootModel` {#root-model-extra}
+
+Because `RootModel` is not capable of storing or even accepting extra fields during initialization, we raise an error
+if you try to specify a value for the config setting `'extra'` when creating a subclass of `RootModel`:
+
+```py
+from pydantic import PydanticUserError, RootModel
+
+
+try:
+    class MyRootModel(RootModel):
+        model_config = {'extra': 'allow'}
+        root: int
+except PydanticUserError as exc_info:
+    assert exc_info.code == 'root-model-extra'
+```
+
 
 {% endraw %}
